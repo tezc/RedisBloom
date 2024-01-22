@@ -114,6 +114,11 @@ int CF_LoadEncodedChunk(const CuckooFilter *cf, long long pos, const char *data,
 }
 
 CuckooFilter *CFHeader_Load(const CFHeader *header) {
+    if (header->bucketSize == 0 || header->numFilters == 0 ||
+        header->numBuckets == 0 || header->numBuckets > CF_MAX_NUM_BUCKETS) {
+        return NULL;
+    }
+
     CuckooFilter *filter = RedisModule_Calloc(1, sizeof(*filter));
     filter->numBuckets = header->numBuckets;
     filter->numFilters = header->numFilters;
