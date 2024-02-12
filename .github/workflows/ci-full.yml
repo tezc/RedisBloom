@@ -26,11 +26,25 @@ on:
           - '[0-9]+.[0-9]+.[0-9]+'
           - '[0-9]+.[0-9]+'
           - 'feature-*'
-          - '*'
       tags:
           - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
           - 'v[0-9]+.[0-9]+.[0-9]+-m[0-9]+'
           - 'v[0-9]+.[0-9]+.[0-9]+'
+
+  workflow_dispatch:
+    inputs:
+      skipjobs:
+        description: 'jobs to skip (delete the ones you want to keep, do not leave empty)'
+        default: 'recent-ubuntu,old-ubuntu,test-valgrind,test-address-sanitizer,debian,centos,amazon-linux,rocky-linux,macos'
+      skip_upload:
+        description: 'skip uploading artifacts to s3, write "true" to skip'
+        default: 'false'
+      use_repo:
+        description: 'repo owner and name'
+        default: 'redisbloom/redisbloom'
+      use_git_ref:
+        description: 'git branch or sha to use'
+        default: 'master'
 
 jobs:
   setup-environment:
@@ -72,6 +86,9 @@ jobs:
 
   recent-ubuntu:
     runs-on: ${{ matrix.builder.os }}
+    if: |
+      (github.event_name == 'workflow_dispatch' || (github.event_name != 'workflow_dispatch' && github.repository == 'redisbloom/redisbloom')) &&
+      !contains(github.event.inputs.skipjobs, 'recent-ubuntu')
     env:
       STAGING: ${{ needs.setup-environment.outputs.STAGING }}
       VERSION: ${{ needs.setup-environment.outputs.TAG }}
@@ -90,6 +107,12 @@ jobs:
         shell: bash -l -eo pipefail {0}
     needs: setup-environment
     steps:
+      - name: prep
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "GITHUB_REPOSITORY=${{github.event.inputs.use_repo}}" >> $GITHUB_ENV
+          echo "GITHUB_HEAD_REF=${{github.event.inputs.use_git_ref}}" >> $GITHUB_ENV
+          echo "skip_upload: ${{github.event.inputs.skip_upload}}"
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential autoconf automake libtool cmake lcov valgrind
       - name: Setup Python for testing
@@ -99,6 +122,8 @@ jobs:
           architecture: 'x64'
       - uses: actions/checkout@v3
         with:
+          repository: ${{ env.GITHUB_REPOSITORY }}
+          ref: ${{ env.GITHUB_HEAD_REF }}
           submodules: true
       - name: Install Python dependencies
         run: |
@@ -124,14 +149,15 @@ jobs:
       - name: Pack module
         run: make pack BRANCH=$TAG_OR_BRANCH SHOW=1
       - name: Configure AWS credentials
+        if: true && !contains(github.event.inputs.skip_upload, 'true')
         uses: aws-actions/configure-aws-credentials@v4
         with:
           unset-current-credentials: true
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: "us-east-2"
       - name: Upload artifacts to S3
+        if: true && !contains(github.event.inputs.skip_upload, 'true')
         run: |
           # TODO: Get rid of this in favour of GitHub actions or a docker image:
           # https://hub.docker.com/r/amazon/aws-cli
