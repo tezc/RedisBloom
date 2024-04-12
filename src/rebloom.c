@@ -107,14 +107,19 @@ static SBChain *bfCreateChain(RedisModuleKey *key, double error_rate, size_t cap
 }
 
 static CuckooFilter *cfCreate(RedisModuleKey *key, size_t capacity, uint16_t bucketSize,
-                              uint16_t maxIterations, uint16_t expansion) {
-    if (capacity < bucketSize * 2)
+                              uint16_t maxIterations, uint16_t expansion, int *err) {
+    *err = CUCKOO_OK;
+
+    if (capacity < bucketSize * 2) {
+        *err = CUCKOO_ERR;
         return NULL;
+    }
 
     CuckooFilter *cf = RedisModule_Calloc(1, sizeof(*cf));
     if (CuckooFilter_Init(cf, capacity, bucketSize, maxIterations, expansion) != 0) {
-        RedisModule_Free(cf); // LCOV_EXCL_LINE
-        cf = NULL;            // LCOV_EXCL_LINE
+        CuckooFilter_Free(cf);
+        *err = CUCKOO_OOM;
+        return NULL;
     }
     RedisModule_ModuleTypeSetValue(key, CFType, cf);
     return cf;
@@ -178,7 +183,7 @@ static int BFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     int err = SB_SUCCESS;
     if (bfCreateChain(key, error_rate, capacity, expansion, nonScaling, &err) == NULL) {
         if (err == SB_OOM) {
-            RedisModule_ReplyWithError(ctx, "ERR insufficient memory");
+            RedisModule_ReplyWithError(ctx, "ERR insufficient memory to create filter");
         } else {
             RedisModule_ReplyWithError(ctx, "ERR could not create filter");
         }
@@ -255,7 +260,7 @@ static int bfInsertCommon(RedisModuleCtx *ctx, RedisModuleString *keystr, RedisM
                            options->nonScaling, &err);
         if (sb == NULL) {
             if (err == SB_OOM) {
-                RedisModule_ReplyWithError(ctx, "ERR insufficient memory");
+                RedisModule_ReplyWithError(ctx, "ERR insufficient memory to create filter");
             } else {
                 RedisModule_ReplyWithError(ctx, "ERR could not create filter");
             }
@@ -586,9 +591,15 @@ static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return RedisModule_ReplyWithError(ctx, statusStrerror(status));
     }
 
-    cf = cfCreate(key, capacity, bucketSize, maxIterations, expansion);
+    int err = CUCKOO_OK;
+    cf = cfCreate(key, capacity, bucketSize, maxIterations, expansion, &err);
     if (cf == NULL) {
-        return RedisModule_ReplyWithError(ctx, "Couldn't create Cuckoo Filter"); // LCOV_EXCL_LINE
+        if (err == CUCKOO_OOM) {
+            RedisModule_ReplyWithError(ctx, "ERR Insufficient memory to create filter");
+        } else {
+            RedisModule_ReplyWithError(ctx, "ERR Could not create filter");
+        }
+        return REDISMODULE_OK;
     } else {
         RedisModule_ReplicateVerbatim(ctx);
         return RedisModule_ReplyWithSimpleString(ctx, "OK");
@@ -609,9 +620,15 @@ static int cfInsertCommon(RedisModuleCtx *ctx, RedisModuleString *keystr, RedisM
     int status = cfGetFilter(key, &cf);
 
     if (status == SB_EMPTY && options->autocreate) {
+        int err = CUCKOO_OK;
         if ((cf = cfCreate(key, options->capacity, CF_DEFAULT_BUCKETSIZE, CF_DEFAULT_MAX_ITERATIONS,
-                           CF_DEFAULT_EXPANSION)) == NULL) {
-            return RedisModule_ReplyWithError(ctx, "Could not create filter"); // LCOV_EXCL_LINE
+                           CF_DEFAULT_EXPANSION, &err)) == NULL) {
+            if (err == CUCKOO_OOM) {
+                RedisModule_ReplyWithError(ctx, "Insufficient memory to create filter");
+            } else {
+                RedisModule_ReplyWithError(ctx, "Could not create filter");
+            }
+            return REDISMODULE_OK;
         }
     } else if (status != SB_OK) {
         return RedisModule_ReplyWithError(ctx, statusStrerror(status));
@@ -672,7 +689,17 @@ static int cfInsertCommon(RedisModuleCtx *ctx, RedisModuleString *keystr, RedisM
             }
             break;
         case CuckooInsert_MemAllocFailed:
-            RedisModule_ReplyWithError(ctx, "Memory allocation failure"); // LCOV_EXCL_LINE
+            if (!options->is_multi) {
+                return RedisModule_ReplyWithError(ctx, "Insufficient memory");
+            } else {
+                if (_is_resp3(ctx) && !options->is_nx) {
+                    // resp3 and CF.INSERT
+                    RedisModule_ReplyWithBool(ctx, 0);
+                } else {
+                    // CF.INSERTNX or resp2
+                    RedisModule_ReplyWithLongLong(ctx, -1);
+                }
+            }
             break;
         default:
             break;

@@ -783,11 +783,11 @@ class testRedisBloomNoCodec():
         try:
             env.cmd('bf.reserve', 'bf', 0.01, 1000000000000000000)
         except ResponseError as e:
-            if str(e) != "insufficient memory":
+            if str(e) != "insufficient memory to create filter":
                 raise e
 
         try:
             env.cmd('bf.insert', 'bf', 'capacity', 1000000000000000000, 'error', 0.01, 'ITEMS', 1)
         except ResponseError as e:
-            if str(e) != "insufficient memory":
+            if str(e) != "insufficient memory to create filter":
                 raise e

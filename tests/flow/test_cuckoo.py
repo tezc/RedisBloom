@@ -535,6 +535,23 @@ class testCuckooNoCodec():
             print("Exception was: " + str(thrown))
             assert False
 
+        # It corrupts 'numBuckets' in the response. See struct CFHeader
+        # for internals.
+        arr = bytearray(chunk[1])
+        for i in range(8, 13):
+            arr[i] = 0
+        arr[14] = 0x01
+
+        thrown = None
+        try:
+            env.cmd('cf.loadchunk', 'cf', 1, bytes(arr))
+        except Exception as e:
+            thrown = e
+
+        if thrown is None or str(thrown) != "Couldn't create filter!":
+            print("Exception was: " + str(thrown))
+            assert False
+
 
     def test_scandump_random_scan_small(self):
         self.cmd('FLUSHALL')
@@ -634,3 +651,25 @@ class testCuckooNoCodec():
             except Exception as e:
                 if str(e) != "Couldn't load chunk!":
                     raise e
+
+    def test_insufficient_memory(self):
+        self.env.skipOnVersionSmaller('7.4')
+
+        try:
+            self.cmd('cf.reserve', 'cf', '100000000000000')
+        except Exception as e:
+            if str(e) != "Insufficient memory to create filter":
+                raise e
+
+        # Try again to verify we don't get 'item exists' reply
+        try:
+            self.cmd('cf.reserve', 'cf', '100000000000000')
+        except Exception as e:
+            if str(e) != "Insufficient memory to create filter":
+                raise e
+
+        try:
+            self.cmd('cf.insert', 'cf', 'capacity', '100000000000000', 'ITEMS', 1)
+        except Exception as e:
+            if str(e) != "Insufficient memory to create filter":
+                raise e
