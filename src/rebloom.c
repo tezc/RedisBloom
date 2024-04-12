@@ -96,10 +96,11 @@ static const char *statusStrerror(int status) {
  * capacity and error rate must not be 0.
  */
 static SBChain *bfCreateChain(RedisModuleKey *key, double error_rate, size_t capacity,
-                              unsigned expansion, unsigned scaling) {
+                              unsigned expansion, unsigned scaling, int *err) {
     SBChain *sb = SB_NewChain(capacity, error_rate, BLOOM_OPT_FORCE64 | scaling | BLOOM_OPT_NOROUND,
-                              expansion);
+                              expansion, err);
     if (sb != NULL) {
+        *err = SB_SUCCESS;
         RedisModule_ModuleTypeSetValue(key, BFType, sb);
     }
     return sb;
@@ -174,11 +175,17 @@ static int BFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return RedisModule_ReplyWithError(ctx, statusStrerror(status));
     }
 
-    if (bfCreateChain(key, error_rate, capacity, expansion, nonScaling) == NULL) {
-        RedisModule_ReplyWithError(ctx, "ERR could not create filter"); // LCOV_EXCL_LINE
-    } else {
-        RedisModule_ReplyWithSimpleString(ctx, "OK");
+    int err = SB_SUCCESS;
+    if (bfCreateChain(key, error_rate, capacity, expansion, nonScaling, &err) == NULL) {
+        if (err == SB_OOM) {
+            RedisModule_ReplyWithError(ctx, "ERR insufficient memory");
+        } else {
+            RedisModule_ReplyWithError(ctx, "ERR could not create filter");
+        }
+        return REDISMODULE_OK;
     }
+
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
     RedisModule_ReplicateVerbatim(ctx);
     return REDISMODULE_OK;
 }
@@ -243,10 +250,16 @@ static int bfInsertCommon(RedisModuleCtx *ctx, RedisModuleString *keystr, RedisM
     const int status = bfGetChain(key, &sb);
 
     if (status == SB_EMPTY && options->autocreate) {
+        int err = SB_SUCCESS;
         sb = bfCreateChain(key, options->error_rate, options->capacity, options->expansion,
-                           options->nonScaling);
+                           options->nonScaling, &err);
         if (sb == NULL) {
-            return RedisModule_ReplyWithError(ctx, "ERR could not create filter"); // LCOV_EXCL_LINE
+            if (err == SB_OOM) {
+                RedisModule_ReplyWithError(ctx, "ERR insufficient memory");
+            } else {
+                RedisModule_ReplyWithError(ctx, "ERR could not create filter");
+            }
+            return REDISMODULE_OK;
         }
     } else if (status != SB_OK) {
         return RedisModule_ReplyWithError(ctx, statusStrerror(status));

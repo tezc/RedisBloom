@@ -650,6 +650,21 @@ class testRedisBloomNoCodec():
         if thrown is None or str(thrown) != "received bad data":
             raise thrown
 
+        # It corrupts 'bytes' and 'bits' fields in the first link.
+        arr = bytearray(chunk[1])
+        for i in range(1):
+            arr[27 + i] = 0x03
+            arr[35 + i] = 0x18
+
+        thrown = None
+        try:
+            env.cmd('bf.loadchunk', 'bf', 1, bytes(arr))
+        except Exception as e:
+            thrown = e
+
+        if thrown is None or str(thrown) != "received bad data":
+            raise thrown
+
 
     def test_scandump_scan_small(self):
         env = self.env
@@ -759,3 +774,20 @@ class testRedisBloomNoCodec():
                         str(e) != "invalid chunk - Too big for current filter" and
                         str(e) != "received bad data"):
                     raise e
+
+
+    def test_insufficient_memory(self):
+        env = self.env
+        env.cmd('FLUSHALL')
+
+        try:
+            env.cmd('bf.reserve', 'bf', 0.01, 1000000000000000000)
+        except ResponseError as e:
+            if str(e) != "insufficient memory":
+                raise e
+
+        try:
+            env.cmd('bf.insert', 'bf', 'capacity', 1000000000000000000, 'error', 0.01, 'ITEMS', 1)
+        except ResponseError as e:
+            if str(e) != "insufficient memory":
+                raise e
