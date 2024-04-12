@@ -624,9 +624,9 @@ static int cfInsertCommon(RedisModuleCtx *ctx, RedisModuleString *keystr, RedisM
         if ((cf = cfCreate(key, options->capacity, CF_DEFAULT_BUCKETSIZE, CF_DEFAULT_MAX_ITERATIONS,
                            CF_DEFAULT_EXPANSION, &err)) == NULL) {
             if (err == CUCKOO_OOM) {
-                RedisModule_ReplyWithError(ctx, "Insufficient memory to create filter");
+                RedisModule_ReplyWithError(ctx, "ERR Insufficient memory to create filter");
             } else {
-                RedisModule_ReplyWithError(ctx, "Could not create filter");
+                RedisModule_ReplyWithError(ctx, "ERR Could not create filter");
             }
             return REDISMODULE_OK;
         }
@@ -690,7 +690,7 @@ static int cfInsertCommon(RedisModuleCtx *ctx, RedisModuleString *keystr, RedisM
             break;
         case CuckooInsert_MemAllocFailed:
             if (!options->is_multi) {
-                return RedisModule_ReplyWithError(ctx, "Insufficient memory");
+                return RedisModule_ReplyWithError(ctx, "ERR Insufficient memory");
             } else {
                 if (_is_resp3(ctx) && !options->is_nx) {
                     // resp3 and CF.INSERT

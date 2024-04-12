@@ -62,6 +62,9 @@ static int createTopK(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, T
         decay = 0.9;
     }
     *topk = TopK_Create(k, width, depth, decay);
+    if (!(*topk)) {
+        INNER_ERROR("ERR Insufficient memory to create topk data structure");
+    }
     return REDISMODULE_OK;
 }
 

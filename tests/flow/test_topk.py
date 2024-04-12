@@ -220,3 +220,18 @@ class testTopK():
         heapList = self.cmd('topk.list', 'topk', 'WITHCOUNT')
         self.assertEqual(['foo', 504, 'bar', 503, 'baz', 502], heapList)
 
+    def test_insufficient_memory(self):
+        self.cmd('FLUSHALL')
+
+        try:
+            self.cmd('topk.reserve', 'x', '3', '2000000000', '200000000', '1')
+        except ResponseError as e:
+            if str(e) != "Insufficient memory to create topk data structure":
+                raise e
+
+        try:
+            self.cmd('topk.reserve', 'x', '3', '2000000000', '2000000000', '1')
+        except ResponseError as e:
+            if str(e) != "Insufficient memory to create topk data structure":
+                raise e
+
