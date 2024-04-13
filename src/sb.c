@@ -33,7 +33,6 @@ static int SBChain_AddLink(SBChain *chain, uint64_t size, double error_rate) {
     *newlink = (SBLink){
         .size = 0,
     };
-
     chain->nfilters++;
     int rc = bloom_init(&newlink->inner, size, error_rate, chain->options);
     if (rc != 0) {
